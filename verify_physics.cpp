@@ -65,8 +65,8 @@ int main() {
                   << std::setw(14) << std::setprecision(4) << err_percent << "%\n";
 
         // Weak field approximation gets progressively better for larger b.
-        // At b=100, the error should be extremely small (typically less than 1%).
-        if (b == 100.0 && err_percent > 1.0) {
+        // At b=100, the first-order approximation error is theoretically ~3%.
+        if (b == 100.0 && err_percent > 5.0) {
             pass_test2 = false;
         }
     }

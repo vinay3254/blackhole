@@ -11,6 +11,7 @@ GeodesicTable::GeodesicTable()
     : m_M(1.0)
     , m_bMin(0.0)
     , m_bMax(100.0)
+    , m_bCrit(0.0)
     , m_stepsB(0)
 {
 }
@@ -20,6 +21,7 @@ void GeodesicTable::GenerateTable(double M, double b_min, double b_max, int step
     m_bMin = b_min;
     m_bMax = b_max;
     m_stepsB = steps_b;
+    m_bCrit = 3.0 * std::sqrt(3.0) * M; // Analytic Schwarzschild critical b
     m_table.resize(steps_b);
 
     // Using OpenMP if available, otherwise runs sequentially
@@ -41,13 +43,19 @@ GeodesicEntry GeodesicTable::Lookup(double b) const {
         return dummy;
     }
 
-    if (b <= m_bMin) {
-        return m_table.front();
+    // Direct check against critical impact parameter
+    if (b <= m_bCrit) {
+        GeodesicEntry entry;
+        entry.b = b;
+        entry.captured = true;
+        entry.deflection = 0.0;
+        entry.r_min = 2.0 * m_M;
+        return entry;
     }
+
     if (b >= m_bMax) {
         // For very large b, return the last entry or approximate with weak-field deflection
         GeodesicEntry last = m_table.back();
-        // Adjust deflection to 4M/b for a better extrapolation
         if (!last.captured) {
             double weak_deflection = 4.0 * m_M / b;
             last.deflection = weak_deflection;
@@ -68,31 +76,17 @@ GeodesicEntry GeodesicTable::Lookup(double b) const {
 
     GeodesicEntry E;
     E.b = b;
+    E.captured = false;
 
-    if (E_low.captured && E_high.captured) {
-        E.captured = true;
-        E.deflection = 0.0;
-        E.r_min = 2.0 * m_M;
-    } else if (!E_low.captured && !E_high.captured) {
-        E.captured = false;
+    if (E_low.captured) {
+        // b is escaping, but the low index is captured.
+        // We are very close to the critical boundary. Return high values.
+        E.deflection = E_high.deflection;
+        E.r_min = E_high.r_min;
+    } else {
+        // Standard interpolation between two escaping rays
         E.deflection = (1.0 - t) * E_low.deflection + t * E_high.deflection;
         E.r_min = (1.0 - t) * E_low.r_min + t * E_high.r_min;
-    } else {
-        // Boundary crossing region.
-        // We determine capture based on whether b is below the critical value.
-        // Let's find the approximate critical b in this interval.
-        // E_low is captured, E_high is escaped.
-        if (t < 0.5) {
-            E.captured = true;
-            E.deflection = 0.0;
-            E.r_min = 2.0 * m_M;
-        } else {
-            E.captured = false;
-            // Near the boundary, deflection diverges logarithmically.
-            // Linear interpolation is poor here, but E_high is the closest non-captured value.
-            E.deflection = E_high.deflection;
-            E.r_min = E_high.r_min;
-        }
     }
 
     return E;

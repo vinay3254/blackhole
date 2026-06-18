@@ -28,6 +28,7 @@ public:
     double GetM() const { return m_M; }
     double GetBMin() const { return m_bMin; }
     double GetBMax() const { return m_bMax; }
+    double GetBCrit() const { return m_bCrit; }
     int GetStepsB() const { return m_stepsB; }
     const std::vector<GeodesicEntry>& GetTable() const { return m_table; }
 
@@ -35,6 +36,7 @@ private:
     double m_M;
     double m_bMin;
     double m_bMax;
+    double m_bCrit;
     int m_stepsB;
     std::vector<GeodesicEntry> m_table;
 };
