@@ -623,13 +623,21 @@
                         // Basic temperature profile T(r) = (R_in / r)^0.75
                         float temp = pow(u_disk_inner / r_cross, 0.75) * u_disk_temp_scale;
 
-                        // Add spiral turbulence and dust lanes using FBM noise
-                        float angle = atan(p_cross.y, p_cross.x);
-                        // Rotate the gas over time
-                        float rot_angle = angle - u_time * (speed / r_cross) * 3.5;
-                        float spiral = sin(r_cross * 1.8 - rot_angle * 2.0);
+                        // Rotate the 3D position vector around Z to animate gas flow without seams
+                        float rot_angle = - u_time * (speed / r_cross) * 3.5;
+                        float cos_a = cos(rot_angle);
+                        float sin_a = sin(rot_angle);
+                        vec3 p_rot = vec3(
+                            p_cross.x * cos_a - p_cross.y * sin_a,
+                            p_cross.x * sin_a + p_cross.y * cos_a,
+                            0.0
+                        );
+
+                        // Spiral pattern coordinate (sine wraps any 2pi or 4pi jump continuously)
+                        float spiral = sin(r_cross * 1.8 - atan(p_rot.y, p_rot.x) * 2.0);
                         
-                        float gas_noise = fbm(vec3(r_cross * 1.5, rot_angle * 3.0, spiral * 1.5));
+                        // Use continuous Cartesian coordinates in FBM noise
+                        float gas_noise = fbm(vec3(p_rot.x * 1.5, p_rot.y * 1.5, spiral * 1.5));
                         
                         // Disk thickness/density distribution
                         float radial_envelope = exp(-pow(r_cross - (u_disk_inner + u_disk_outer) * 0.5, 2.0) / (0.18 * pow(u_disk_outer - u_disk_inner, 2.0)));

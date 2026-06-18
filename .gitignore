@@ -1,5 +1,9 @@
 verify_physics
 verify_physics.exe
+render_test
+render_test.exe
+blackhole.bmp
+blackhole.png
 *.o
 *.obj
 *.pdb
