@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schwarzschild Black Hole Interactive Ray-Tracer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #ff6600;
+            --accent-glow: rgba(255, 102, 0, 0.4);
+            --bg-dark: #030307;
+            --panel-bg: rgba(10, 10, 20, 0.6);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f0f0f5;
+            --text-muted: #8a8a9e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-dark);
+            font-family: 'Outfit', sans-serif;
+            color: var(--text-main);
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Glass Control Panel overlay */
+        .overlay-panel {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            width: 360px;
+            max-height: calc(100% - 48px);
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 24px;
+            z-index: 10;
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.1) transparent;
+        }
+
+        .overlay-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+        .overlay-panel::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+        }
+
+        header {
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--accent);
+            margin: 20px 0 10px 0;
+            border-bottom: 1px solid rgba(255, 102, 0, 0.2);
+            padding-bottom: 4px;
+        }
+
+        .control-group {
+            margin-bottom: 16px;
+        }
+
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 6px;
+            color: #d1d1e0;
+        }
+
+        .control-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Styled Slider Inputs */
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+            transition: background 0.3s;
+        }
+
+        input[type="range"]:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--accent-glow);
+            transition: transform 0.1s, background-color 0.2s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            background: #ff8533;
+        }
+
+        /* Toggle switches */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            color: #d1d1e0;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255,255,255,0.15);
+            transition: .3s;
+            border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent);
+            box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(22px);
+        }
+
+        /* Resolution selector buttons */
+        .btn-group {
+            display: flex;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 2px;
+            margin-top: 4px;
+        }
+
+        .btn-group button {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 0;
+            font-size: 11px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: 0.2s;
+        }
+
+        .btn-group button.active {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .hud-hint {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.05);
+            font-size: 12px;
+            color: var(--text-muted);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Loading / Error state styles */
+        #loader {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-dark);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 102, 0, 0.1);
+            border-top: 3px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #error-msg {
+            color: #ff3333;
+            max-width: 80%;
+            text-align: center;
+            font-size: 14px;
+            display: none;
+            margin-top: 20px;
+            background: rgba(255,0,0,0.1);
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <p>Compiling General Relativity Ray-Tracer Shaders...</p>
+        <div id="error-msg"></div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="gl-canvas"></canvas>
+    </div>
+
+    <div class="hud-hint">
+        Left-click & Drag to Orbit | Scroll to Zoom
+    </div>
+
+    <div class="overlay-panel">
+        <header>
+            <h1>SINGULARITY</h1>
+            <div class="subtitle">General Relativity Visualizer</div>
+        </header>
+
+        <div class="section-title">Camera Orbit</div>
+        
+        <div class="control-group">
+            <div class="control-label">
+                <span>Distance</span>
+                <span class="control-value" id="val-cam-dist">15.0</span>
+            </div>
+            <input type="range" id="slider-cam-dist" min="5.0" max="30.0" step="0.1" value="15.0">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Pitch (Tilt)</span>
+                <span class="control-value" id="val-cam-pitch">0.15 rad</span>
+            </div>
+            <input type="range" id="slider-cam-pitch" min="-1.5" max="1.5" step="0.01" value="0.15">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Yaw (Rotate)</span>
+                <span class="control-value" id="val-cam-yaw">0.00 rad</span>
+            </div>
+            <input type="range" id="slider-cam-yaw" min="0.0" max="6.283" step="0.01" value="0.0">
+        </div>
+
+        <div class="section-title">Physics & Core</div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Mass (M)</span>
+                <span class="control-value" id="val-mass">1.0</span>
+            </div>
+            <input type="range" id="slider-mass" min="0.2" max="3.0" step="0.05" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Step Size (Precision)</span>
+                <span class="control-value" id="val-dt">0.080</span>
+            </div>
+            <input type="range" id="slider-dt" min="0.02" max="0.15" step="0.005" value="0.08">
+        </div>
+
+        <div class="section-title">Accretion Disk</div>
+
+        <div class="toggle-container">
+            <span class="toggle-label">Enable Accretion Disk</span>
+            <label class="switch">
+                <input type="checkbox" id="toggle-disk" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Inner Limit</span>
+                <span class="control-value" id="val-disk-inner">3.0 M</span>
+            </div>
+            <input type="range" id="slider-disk-inner" min="2.0" max="8.0" step="0.1" value="3.0">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Outer Limit</span>
+                <span class="control-value" id="val-disk-outer">12.0 M</span>
+            </div>
+            <input type="range" id="slider-disk-outer" min="8.0" max="25.0" step="0.2" value="12.0">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Disk Intensity</span>
+                <span class="control-value" id="val-disk-bright">1.50</span>
+            </div>
+            <input type="range" id="slider-disk-bright" min="0.1" max="5.0" step="0.05" value="1.5">
+        </div>
+
+        <div class="control-group">
+            <div class="control-label">
+                <span>Temperature Color</span>
+                <span class="control-value" id="val-disk-temp">1.40</span>
+            </div>
+            <input type="range" id="slider-disk-temp" min="0.5" max="3.0" step="0.05" value="1.4">
+        </div>
+
+        <div class="section-title">Einstein Relatives</div>
+
+        <div class="toggle-container">
+            <span class="toggle-label">Relativistic Doppler Beaming</span>
+            <label class="switch">
+                <input type="checkbox" id="toggle-beaming" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="section-title">Performance</div>
+        
+        <div class="control-group">
+            <div class="control-label">
+                <span>Resolution Scale</span>
+            </div>
+            <div class="btn-group" id="res-group">
+                <button value="0.25">0.25x</button>
+                <button value="0.5">0.50x</button>
+                <button value="0.75" class="active">0.75x</button>
+                <button value="1.0">1.00x</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebGL Shaders -->
+    <script>
+        const VS_SOURCE = `#version 300 es
+        in vec2 position;
+        out vec2 v_uv;
+        void main() {
+            v_uv = position * 0.5 + 0.5;
+            gl_Position = vec4(position, 0.0, 1.0);
+        }`;
+
+        const FS_SOURCE = `#version 300 es
+        precision highp float;
+        in vec2 v_uv;
+        out vec4 outColor;
+
+        uniform vec2 u_resolution;
+        uniform vec3 u_cam_pos;
+        uniform vec3 u_cam_dir;
+        uniform vec3 u_cam_up;
+        uniform vec3 u_cam_right;
+
+        uniform float u_mass;
+        uniform float u_time;
+        uniform float u_disk_toggle;
+        uniform float u_disk_inner;
+        uniform float u_disk_outer;
+        uniform float u_disk_bright;
+        uniform float u_disk_temp_scale;
+        uniform float u_beaming_toggle;
+        uniform float u_dt_base;
+
+        // Custom fast hash & noise functions
+        float hash(vec3 p) {
+            p = fract(p * 0.3183099 + vec3(0.1, 0.1, 0.1));
+            p *= 17.0;
+            return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        float noise(vec3 x) {
+            vec3 i = floor(x);
+            vec3 f = fract(x);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(mix(hash(i + vec3(0, 0, 0)), hash(i + vec3(1, 0, 0)), f.x),
+                           mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+                       mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+                           mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+        }
+
+        float fbm(vec3 p) {
+            float v = 0.0;
+            float a = 0.5;
+            vec3 shift = vec3(100.0);
+            for (int i = 0; i < 4; ++i) {
+                v += a * noise(p);
+                p = p * 2.0 + shift;
+                a *= 0.5;
+            }
+            return v;
+        }
+
+        // Color mapping from temperature
+        vec3 blackbody(float temp) {
+            vec3 col = vec3(0.0);
+            col.r = 1.0 - exp(-temp * 2.5);
+            col.g = 1.0 - exp(-temp * temp * 1.5);
+            col.b = 1.0 - exp(-temp * temp * temp * 4.0);
+            return clamp(col, 0.0, 1.0);
+        }
+
+        // Procedural background stars
+        vec3 getStarfield(vec3 rd) {
+            float n = hash(floor(rd * 350.0));
+            vec3 color = vec3(0.0);
+            if (n > 0.995) {
+                float b = pow(fract(n * 100.0), 12.0) * 0.9;
+                color = vec3(b * (0.85 + 0.15 * fract(n * 5.0)),
+                             b * (0.85 + 0.15 * fract(n * 11.0)),
+                             b * (0.9 + 0.1 * fract(n * 17.0)));
+            }
+            // Add a beautiful multi-colored nebula background
+            float neb1 = fbm(rd * 2.0 + vec3(0.0, 0.0, 0.0));
+            float neb2 = fbm(rd * 4.5 + vec3(15.0, 20.0, 10.0));
+            color += vec3(neb1 * 0.08, neb1 * 0.03, neb1 * 0.15);
+            color += vec3(neb2 * 0.04, neb2 * 0.08, neb2 * 0.04);
+            return color;
+        }
+
+        void main() {
+            vec2 uv = (v_uv - 0.5) * 2.0;
+            uv.x *= u_resolution.x / u_resolution.y;
+
+            // Setup camera ray
+            vec3 ro = u_cam_pos;
+            vec3 rd = normalize(u_cam_dir + uv.x * u_cam_right + uv.y * u_cam_up);
+
+            float M = u_mass;
+
+            // Isotropic coordinate initialization
+            float r = length(ro);
+            float u = M / (2.0 * r);
+            float n_cam = pow(1.0 + u, 3.0) / (1.0 - u);
+
+            vec3 p = ro;
+            vec3 v = rd / n_cam;
+
+            vec3 acc_color = vec3(0.0);
+            float ray_transmission = 1.0;
+
+            float dt_base = u_dt_base;
+            float isotropic_horizon = 0.5 * M;
+
+            // Integration Loop
+            for (int step = 0; step < 160; ++step) {
+                float r_cur = length(p);
+
+                // Crossed the event horizon?
+                if (r_cur < 0.502 * M) {
+                    ray_transmission = 0.0;
+                    break;
+                }
+
+                // Escaped to deep space?
+                if (r_cur > 40.0 * M) {
+                    acc_color += ray_transmission * getStarfield(normalize(v));
+                    ray_transmission = 0.0;
+                    break;
+                }
+
+                // Adaptive step size based on distance from the event horizon
+                float dt = dt_base * (r_cur - 0.495 * M);
+
+                // Geodesic acceleration in isotropic coordinates
+                float u_c = M / (2.0 * r_cur);
+                float num = - M * pow(1.0 + u_c, 5.0) * (2.0 - u_c);
+                float den = pow(r_cur, 3.0) * pow(1.0 - u_c, 3.0);
+                vec3 a = (num / den) * p;
+
+                vec3 p_prev = p;
+                p += v * dt + 0.5 * a * dt * dt;
+
+                float r_next = length(p);
+                float u_n = M / (2.0 * r_next);
+                float num_n = - M * pow(1.0 + u_n, 5.0) * (2.0 - u_n);
+                float den_n = pow(r_next, 3.0) * pow(1.0 - u_n, 3.0);
+                vec3 a_next = (num_n / den_n) * p;
+
+                v += 0.5 * (a + a_next) * dt;
+
+                // Check equatorial plane crossing (z = 0)
+                if (p_prev.z * p.z < 0.0 && u_disk_toggle > 0.5) {
+                    float t_cross = -p_prev.z / (p.z - p_prev.z);
+                    vec3 p_cross = mix(p_prev, p, t_cross);
+                    float r_cross = length(p_cross);
+
+                    if (r_cross >= u_disk_inner && r_cross <= u_disk_outer) {
+                        // Keplerian orbit speed approximation
+                        float R_cross = r_cross * pow(1.0 + M / (2.0 * r_cross), 2.0);
+                        float speed = sqrt(M / R_cross);
+                        // Rotating counter-clockwise viewed from positive Z
+                        vec3 disk_vel = vec3(-p_cross.y, p_cross.x, 0.0) / r_cross * speed;
+
+                        // Relativistic Doppler Factor
+                        vec3 ray_dir = normalize(v);
+                        float v_dot_rd = dot(disk_vel, ray_dir);
+                        float beta2 = dot(disk_vel, disk_vel);
+                        float gamma = 1.0 / sqrt(1.0 - beta2);
+                        float doppler = 1.0 / (gamma * (1.0 - v_dot_rd));
+
+                        // Gravitational Redshift Factor
+                        float u_cross = M / (2.0 * r_cross);
+                        float g00_cross = pow((1.0 - u_cross) / (1.0 + u_cross), 2.0);
+                        float g00_cam = pow((1.0 - u) / (1.0 + u), 2.0);
+                        float grav_redshift = sqrt(g00_cross / g00_cam);
+
+                        // Combined Relativistic Shift
+                        float rel_shift = grav_redshift * (u_beaming_toggle > 0.5 ? doppler : 1.0);
+
+                        // Basic temperature profile T(r) = (R_in / r)^0.75
+                        float temp = pow(u_disk_inner / r_cross, 0.75) * u_disk_temp_scale;
+
+                        // Add spiral turbulence and dust lanes using FBM noise
+                        float angle = atan(p_cross.y, p_cross.x);
+                        // Rotate the gas over time
+                        float rot_angle = angle - u_time * (speed / r_cross) * 3.5;
+                        float spiral = sin(r_cross * 1.8 - rot_angle * 2.0);
+                        
+                        float gas_noise = fbm(vec3(r_cross * 1.5, rot_angle * 3.0, spiral * 1.5));
+                        
+                        // Disk thickness/density distribution
+                        float radial_envelope = exp(-pow(r_cross - (u_disk_inner + u_disk_outer) * 0.5, 2.0) / (0.18 * pow(u_disk_outer - u_disk_inner, 2.0)));
+                        float density = (0.2 + 0.8 * gas_noise) * radial_envelope;
+                        float opacity = 1.0 - exp(-density * 1.4);
+
+                        // Apply relativistic frequency shift and beaming (intensity scales as shift^3)
+                        vec3 shifted_color = blackbody(temp * rel_shift);
+                        float beaming = u_beaming_toggle > 0.5 ? pow(doppler, 3.5) : 1.0;
+                        vec3 emission = shifted_color * beaming * u_disk_bright;
+
+                        // Alpha blending
+                        acc_color += ray_transmission * emission * opacity;
+                        ray_transmission *= (1.0 - opacity);
+
+                        if (ray_transmission < 0.01) {
+                            ray_transmission = 0.0;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            outColor = vec4(acc_color, 1.0);
+        }
+        `;
+    </script>
+
+    <!-- Main Visualizer Script -->
+    <script>
+        // DOM Elements
+        const canvas = document.getElementById("gl-canvas");
+        const loader = document.getElementById("loader");
+        const errorMsg = document.getElementById("error-msg");
+
+        // Controls
+        const sCamDist = document.getElementById("slider-cam-dist");
+        const sCamPitch = document.getElementById("slider-cam-pitch");
+        const sCamYaw = document.getElementById("slider-cam-yaw");
+        const sMass = document.getElementById("slider-mass");
+        const sDt = document.getElementById("slider-dt");
+        const sDiskInner = document.getElementById("slider-disk-inner");
+        const sDiskOuter = document.getElementById("slider-disk-outer");
+        const sDiskBright = document.getElementById("slider-disk-bright");
+        const sDiskTemp = document.getElementById("slider-disk-temp");
+        const tDisk = document.getElementById("toggle-disk");
+        const tBeaming = document.getElementById("toggle-beaming");
+        const resGroup = document.getElementById("res-group");
+
+        // Values display
+        const valCamDist = document.getElementById("val-cam-dist");
+        const valCamPitch = document.getElementById("val-cam-pitch");
+        const valCamYaw = document.getElementById("val-cam-yaw");
+        const valMass = document.getElementById("val-mass");
+        const valDt = document.getElementById("val-dt");
+        const valDiskInner = document.getElementById("val-disk-inner");
+        const valDiskOuter = document.getElementById("val-disk-outer");
+        const valDiskBright = document.getElementById("val-disk-bright");
+        const valDiskTemp = document.getElementById("val-disk-temp");
+
+        // App state
+        let gl;
+        let program;
+        let resolutionScale = 0.75;
+        let lastTime = 0;
+        let animatedTime = 0;
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // Camera values
+        let camDistance = parseFloat(sCamDist.value);
+        let camPitch = parseFloat(sCamPitch.value);
+        let camYaw = parseFloat(sCamYaw.value);
+
+        // Uniform locations
+        let uniforms = {};
+
+        function initWebGL() {
+            gl = canvas.getContext("webgl2", { antialias: false, powerPreference: "high-performance" });
+            if (!gl) {
+                showError("WebGL 2 not supported in this browser. Please try a different browser.");
+                return;
+            }
+
+            // Create program
+            const vs = compileShader(gl.VERTEX_SHADER, VS_SOURCE);
+            const fs = compileShader(gl.FRAGMENT_SHADER, FS_SOURCE);
+            if (!vs || !fs) return;
+
+            program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                showError("Program linking failed: " + gl.getProgramInfoLog(program));
+                return;
+            }
+
+            // Set up buffer
+            const positions = new Float32Array([
+                -1, -1,
+                 1, -1,
+                -1,  1,
+                -1,  1,
+                 1, -1,
+                 1,  1
+            ]);
+
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+            const positionLoc = gl.getAttribLocation(program, "position");
+            gl.enableVertexAttribArray(positionLoc);
+            gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+            // Get uniform locations
+            const uniformNames = [
+                "u_resolution", "u_cam_pos", "u_cam_dir", "u_cam_up", "u_cam_right",
+                "u_mass", "u_time", "u_disk_toggle", "u_disk_inner", "u_disk_outer",
+                "u_disk_bright", "u_disk_temp_scale", "u_beaming_toggle", "u_dt_base"
+            ];
+            uniformNames.forEach(name => {
+                uniforms[name] = gl.getUniformLocation(program, name);
+            });
+
+            // Hide loader
+            loader.style.opacity = "0";
+            setTimeout(() => { loader.style.display = "none"; }, 500);
+
+            // Start animation loop
+            requestAnimationFrame(render);
+        }
+
+        function compileShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                showError("Shader compilation failed: " + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function showError(msg) {
+            errorMsg.innerText = msg;
+            errorMsg.style.display = "block";
+            loader.querySelector(".spinner").style.display = "none";
+            loader.querySelector("p").innerText = "Error encountered:";
+        }
+
+        function resizeCanvas() {
+            const width = Math.floor(canvas.clientWidth * resolutionScale);
+            const height = Math.floor(canvas.clientHeight * resolutionScale);
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+                gl.viewport(0, 0, width, height);
+            }
+        }
+
+        // Camera coordinate calculations
+        function getCameraVectors() {
+            // Spherical coordinates
+            const x = camDistance * Math.cos(camPitch) * Math.sin(camYaw);
+            const y = camDistance * Math.sin(camPitch);
+            const z = camDistance * Math.cos(camPitch) * Math.cos(camYaw);
+
+            const pos = [x, y, z];
+            
+            // Vector pointing to origin [0,0,0] from camera position
+            const len = Math.sqrt(x*x + y*y + z*z);
+            const dir = [-x/len, -y/len, -z/len];
+
+            // Right vector
+            const rx = -Math.cos(camYaw);
+            const rz = Math.sin(camYaw);
+            const rightLen = Math.sqrt(rx*rx + rz*rz);
+            const right = [rx/rightLen, 0, rz/rightLen];
+
+            // Up vector = right x dir
+            const up = [
+                right[1]*dir[2] - right[2]*dir[1],
+                right[2]*dir[0] - right[0]*dir[2],
+                right[0]*dir[1] - right[1]*dir[0]
+            ];
+
+            return { pos, dir, up, right };
+        }
+
+        function render(now) {
+            // Calculate dt and animate time
+            if (lastTime === 0) lastTime = now;
+            const delta = (now - lastTime) * 0.001;
+            lastTime = now;
+            
+            animatedTime += delta;
+
+            resizeCanvas();
+
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+
+            // Camera math
+            const cam = getCameraVectors();
+
+            // Set uniforms
+            gl.uniform2f(uniforms.u_resolution, canvas.width, canvas.height);
+            gl.uniform3fv(uniforms.u_cam_pos, new Float32Array(cam.pos));
+            gl.uniform3fv(uniforms.u_cam_dir, new Float32Array(cam.dir));
+            gl.uniform3fv(uniforms.u_cam_up, new Float32Array(cam.up));
+            gl.uniform3fv(uniforms.u_cam_right, new Float32Array(cam.right));
+
+            gl.uniform1f(uniforms.u_mass, parseFloat(sMass.value));
+            gl.uniform1f(uniforms.u_time, animatedTime);
+            gl.uniform1f(uniforms.u_disk_toggle, tDisk.checked ? 1.0 : 0.0);
+            gl.uniform1f(uniforms.u_disk_inner, parseFloat(sDiskInner.value));
+            gl.uniform1f(uniforms.u_disk_outer, parseFloat(sDiskOuter.value));
+            gl.uniform1f(uniforms.u_disk_bright, parseFloat(sDiskBright.value));
+            gl.uniform1f(uniforms.u_disk_temp_scale, parseFloat(sDiskTemp.value));
+            gl.uniform1f(uniforms.u_beaming_toggle, tBeaming.checked ? 1.0 : 0.0);
+            gl.uniform1f(uniforms.u_dt_base, parseFloat(sDt.value));
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            requestAnimationFrame(render);
+        }
+
+        // Mouse Drag Orbit Controls
+        canvas.addEventListener("mousedown", (e) => {
+            isDragging = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        window.addEventListener("mouseup", () => {
+            isDragging = false;
+        });
+
+        window.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+
+            // Update Yaw and Pitch
+            camYaw -= dx * 0.005;
+            camPitch += dy * 0.005;
+
+            // Clamp pitch to avoid turning camera upside down
+            camPitch = Math.max(-1.45, Math.min(1.45, camPitch));
+
+            // Sync with sliders
+            sCamPitch.value = camPitch;
+            sCamYaw.value = (camYaw % 6.283 + 6.283) % 6.283;
+            updateUI();
+        });
+
+        // Mouse Scroll Zoom
+        canvas.addEventListener("wheel", (e) => {
+            camDistance += e.deltaY * 0.01;
+            camDistance = Math.max(5.0, Math.min(30.0, camDistance));
+            sCamDist.value = camDistance;
+            updateUI();
+        });
+
+        // UI Event Listeners
+        const sliders = [
+            { slider: sCamDist, display: valCamDist, suffix: "" },
+            { slider: sCamPitch, display: valCamPitch, suffix: " rad" },
+            { slider: sCamYaw, display: valCamYaw, suffix: " rad" },
+            { slider: sMass, display: valMass, suffix: "" },
+            { slider: sDt, display: valDt, suffix: "" },
+            { slider: sDiskInner, display: valDiskInner, suffix: " M" },
+            { slider: sDiskOuter, display: valDiskOuter, suffix: " M" },
+            { slider: sDiskBright, display: valDiskBright, suffix: "" },
+            { slider: sDiskTemp, display: valDiskTemp, suffix: "" }
+        ];
+
+        sliders.forEach(s => {
+            s.slider.addEventListener("input", () => {
+                if (s.slider === sCamDist) camDistance = parseFloat(sCamDist.value);
+                if (s.slider === sCamPitch) camPitch = parseFloat(sCamPitch.value);
+                if (s.slider === sCamYaw) camYaw = parseFloat(sCamYaw.value);
+                updateUI();
+            });
+        });
+
+        function updateUI() {
+            sliders.forEach(s => {
+                s.display.innerText = parseFloat(s.slider.value).toFixed(2) + s.suffix;
+            });
+
+            // Prevent inner radius exceeding outer radius
+            const inner = parseFloat(sDiskInner.value);
+            const outer = parseFloat(sDiskOuter.value);
+            if (inner >= outer - 0.5) {
+                sDiskInner.value = outer - 0.5;
+                valDiskInner.innerText = (outer - 0.5).toFixed(2) + " M";
+            }
+        }
+
+        // Resolution settings buttons
+        resGroup.querySelectorAll("button").forEach(btn => {
+            btn.addEventListener("click", () => {
+                resGroup.querySelector(".active").classList.remove("active");
+                btn.classList.add("active");
+                resolutionScale = parseFloat(btn.value);
+            });
+        });
+
+        // Start Everything
+        updateUI();
+        initWebGL();
+    </script>
+</body>
+</html>
