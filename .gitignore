@@ -1,0 +1,12 @@
+verify_physics
+verify_physics.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+.vs/
+out/
+build/
+x64/
+Debug/
+Release/
