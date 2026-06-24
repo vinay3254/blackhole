@@ -41,6 +41,7 @@ inline Vector3 cross(const Vector3& u, const Vector3& v) {
 // Rendering parameters configured by sliders/UI
 struct RenderParams {
     double M = 1.0;                     // Black hole mass
+    double a = 0.9;                     // Black hole spin parameter (Kerr parameter, -M to M)
     double cam_distance = 15.0;         // Camera distance from origin
     double cam_pitch = 0.15;            // Camera pitch angle in radians (tilt)
     double cam_yaw = 0.0;               // Camera yaw angle in radians (orbit rotation)
@@ -67,6 +68,8 @@ public:
 
 private:
     // Helper mathematical and procedural functions
+    static void GetDerivatives(const Vector3& pos, const Vector3& mom, double M, double a,
+                               Vector3& dpos, Vector3& dmom, double& r_out);
     static double Hash(const Vector3& p);
     static double Noise(const Vector3& x);
     static double Fbm(const Vector3& p);

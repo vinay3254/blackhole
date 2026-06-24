@@ -136,8 +136,80 @@ Vector3 BlackHoleRenderer::GetStarfield(const Vector3& rd) {
     return core_color + band_color + star_color + neb_color;
 }
 
+void BlackHoleRenderer::GetDerivatives(const Vector3& pos, const Vector3& mom, double M, double a,
+                                       Vector3& dpos, Vector3& dmom, double& r_out) {
+    double x = pos.x;
+    double y = pos.y;
+    double z = pos.z;
+
+    double rho2 = x * x + y * y + z * z;
+    double r2 = 0.5 * ((rho2 - a * a) + std::sqrt(std::max(0.0, (rho2 - a * a) * (rho2 - a * a) + 4.0 * a * a * z * z)));
+    double r = std::sqrt(r2);
+    r_out = r;
+
+    // Avoid division by zero at the singularity/ring
+    if (r < 1e-6) r = 1e-6;
+
+    // 1. Compute derivatives of r with respect to x, y, z
+    double den_r = r * r * r * r + a * a * z * z;
+    if (den_r < 1e-9) den_r = 1e-9;
+    
+    double dr_dx = (r * r * r * x) / den_r;
+    double dr_dy = (r * r * r * y) / den_r;
+    double dr_dz = (r * (r * r + a * a) * z) / den_r;
+    Vector3 grad_r(dr_dx, dr_dy, dr_dz);
+
+    // 2. Compute H_KS = M * r^3 / (r^4 + a^2 * z^2)
+    double H_KS = (M * r * r * r) / den_r;
+
+    // 3. Compute gradient of H_KS
+    double dH_dr = M * r * r * (3.0 * a * a * z * z - r * r * r * r) / (den_r * den_r);
+    double dH_dz_explicit = -2.0 * a * a * M * r * r * r * z / (den_r * den_r);
+    Vector3 grad_H = dH_dr * grad_r;
+    grad_H.z += dH_dz_explicit;
+
+    // 4. Compute covariant null vector l_mu
+    double D = r * r + a * a;
+    if (D < 1e-9) D = 1e-9;
+    
+    Vector3 l((r * x + a * y) / D, (r * y - a * x) / D, z / r);
+
+    // 5. Compute derivatives of l_mu
+    Vector3 grad_lx;
+    grad_lx.x = ((dr_dx * x + r) * D - (r * x + a * y) * 2.0 * r * dr_dx) / (D * D);
+    grad_lx.y = ((dr_dy * x + a) * D - (r * x + a * y) * 2.0 * r * dr_dy) / (D * D);
+    grad_lx.z = ((dr_dz * x) * D - (r * x + a * y) * 2.0 * r * dr_dz) / (D * D);
+
+    Vector3 grad_ly;
+    grad_ly.x = ((dr_dx * y - a) * D - (r * y - a * x) * 2.0 * r * dr_dx) / (D * D);
+    grad_ly.y = ((dr_dy * y + r) * D - (r * y - a * x) * 2.0 * r * dr_dy) / (D * D);
+    grad_ly.z = ((dr_dz * y) * D - (r * y - a * x) * 2.0 * r * dr_dz) / (D * D);
+
+    Vector3 grad_lz;
+    grad_lz.x = -z * dr_dx / (r * r);
+    grad_lz.y = -z * dr_dy / (r * r);
+    grad_lz.z = (r - z * dr_dz) / (r * r);
+
+    // 6. Compute S = p_0 - l . p (where p_0 = -1.0)
+    double p_0 = -1.0;
+    double S = p_0 - dot(l, mom);
+
+    // 7. Compute dpos = dx/dlambda
+    dpos = mom + (2.0 * H_KS * S) * l;
+
+    // 8. Compute dmom = dp/dlambda
+    Vector3 grad_l_p(
+        mom.x * grad_lx.x + mom.y * grad_ly.x + mom.z * grad_lz.x,
+        mom.x * grad_lx.y + mom.y * grad_ly.y + mom.z * grad_lz.y,
+        mom.x * grad_lx.z + mom.y * grad_ly.z + mom.z * grad_lz.z
+    );
+
+    dmom = S * S * grad_H - (2.0 * H_KS * S) * grad_l_p;
+}
+
 void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int height, const RenderParams& params) {
     double M = params.M;
+    double a = params.a;
     double dist = params.cam_distance;
     double pitch = params.cam_pitch;
     double yaw = params.cam_yaw;
@@ -159,6 +231,9 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
     Vector3 cam_up = cross(cam_right, cam_dir);
     double aspect = static_cast<double>(width) / height;
 
+    // Outer event horizon radius for Kerr black hole
+    double r_horizon = M + std::sqrt(std::max(0.0, M * M - a * a));
+
     // Run parallel ray tracing loop across all pixels
     #pragma omp parallel for collapse(2) schedule(dynamic)
     for (int y = 0; y < height; ++y) {
@@ -168,26 +243,50 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
             double py = (static_cast<double>(y) / height - 0.5) * 2.0;
             px *= aspect;
 
-            // Generate ray
+            // Generate ray direction
             Vector3 rd = (cam_dir + px * cam_right + py * cam_up).normalized();
 
-            // Isotropic coordinate scale
-            double r = cam_pos.length();
-            double u = M / (2.0 * r);
-            double n_cam = std::pow(1.0 + u, 3.0) / (1.0 - u);
-
+            // Setup camera coordinates in Kerr-Schild
             Vector3 p = cam_pos;
-            Vector3 v = rd / n_cam;
+
+            // Satisfy the null condition g^uv p_u p_v = 0 exactly at the camera position
+            double px_cam = cam_pos.x;
+            double py_cam = cam_pos.y;
+            double pz_cam = cam_pos.z;
+            double rho2_cam = px_cam * px_cam + py_cam * py_cam + pz_cam * pz_cam;
+            double r2_cam = 0.5 * ((rho2_cam - a * a) + std::sqrt(std::max(0.0, (rho2_cam - a * a) * (rho2_cam - a * a) + 4.0 * a * a * pz_cam * pz_cam)));
+            double r_cam = std::sqrt(r2_cam);
+            if (r_cam < 1e-6) r_cam = 1e-6;
+            double den_cam = r_cam * r_cam * r_cam * r_cam + a * a * pz_cam * pz_cam;
+            if (den_cam < 1e-9) den_cam = 1e-9;
+            double H_KS_cam = (M * r_cam * r_cam * r_cam) / den_cam;
+            double D_cam = r_cam * r_cam + a * a;
+            if (D_cam < 1e-9) D_cam = 1e-9;
+            Vector3 l_cam((r_cam * px_cam + a * py_cam) / D_cam, (r_cam * py_cam - a * px_cam) / D_cam, pz_cam / r_cam);
+            
+            double L_d = dot(l_cam, rd);
+            double p_0 = -1.0;
+            double A_k = 1.0 - 2.0 * H_KS_cam * L_d * L_d;
+            double B_k = 4.0 * H_KS_cam * p_0 * L_d;
+            double C_k = -1.0 - 2.0 * H_KS_cam * p_0 * p_0;
+            double disc = B_k * B_k - 4.0 * A_k * C_k;
+            double k = 1.0;
+            if (disc >= 0.0) {
+                k = (-B_k + std::sqrt(disc)) / (2.0 * A_k);
+            }
+            Vector3 v = k * rd; // Contravariant spatial momentum
 
             Vector3 acc_color(0.0, 0.0, 0.0);
             double ray_transmission = 1.0;
 
-            // Photon propagation loop
-            for (int step = 0; step < 160; ++step) {
-                double r_cur = p.length();
+            // Coupled RK4 Geodesic Integration Loop
+            for (int step = 0; step < 180; ++step) {
+                double r_cur;
+                Vector3 dx_dummy, dp_dummy;
+                GetDerivatives(p, v, M, a, dx_dummy, dp_dummy, r_cur);
 
-                // Captured: Event horizon crossed ( isotropic radius = 0.5M )
-                if (r_cur < 0.502 * M) {
+                // Captured: Event horizon crossed (in Kerr-Schild, event horizon is at r_horizon)
+                if (r_cur < r_horizon + 0.01) {
                     ray_transmission = 0.0;
                     break;
                 }
@@ -200,52 +299,63 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
                 }
 
                 // Adaptive step size based on proximity to horizon
-                double dt = params.dt_base * (r_cur - 0.495 * M);
+                double dt = params.dt_base * (r_cur - 0.95 * r_horizon);
+                if (dt < 0.005) dt = 0.005; // clamp step size for stability
 
-                // Verlet step: compute acceleration
-                double u_c = M / (2.0 * r_cur);
-                double num = -M * std::pow(1.0 + u_c, 5.0) * (2.0 - u_c);
-                double den = std::pow(r_cur, 3.0) * std::pow(1.0 - u_c, 3.0);
-                Vector3 a = (num / den) * p;
+                // 4th-order Runge-Kutta coupled integration step
+                Vector3 k1_x, k1_p;
+                GetDerivatives(p, v, M, a, k1_x, k1_p, r_cur);
+
+                Vector3 k2_x, k2_p;
+                GetDerivatives(p + 0.5 * dt * k1_x, v + 0.5 * dt * k1_p, M, a, k2_x, k2_p, r_cur);
+
+                Vector3 k3_x, k3_p;
+                GetDerivatives(p + 0.5 * dt * k2_x, v + 0.5 * dt * k2_p, M, a, k3_x, k3_p, r_cur);
+
+                Vector3 k4_x, k4_p;
+                GetDerivatives(p + dt * k3_x, v + dt * k3_p, M, a, k4_x, k4_p, r_cur);
 
                 Vector3 p_prev = p;
-                p += v * dt + 0.5 * a * dt * dt;
-
-                double r_next = p.length();
-                double u_n = M / (2.0 * r_next);
-                double num_n = -M * std::pow(1.0 + u_n, 5.0) * (2.0 - u_n);
-                double den_n = std::pow(r_next, 3.0) * std::pow(1.0 - u_n, 3.0);
-                Vector3 a_next = (num_n / den_n) * p;
-
-                v += 0.5 * (a + a_next) * dt;
+                p += (dt / 6.0) * (k1_x + 2.0 * k2_x + 2.0 * k3_x + k4_x);
+                v += (dt / 6.0) * (k1_p + 2.0 * k2_p + 2.0 * k3_p + k4_p);
 
                 // Accretion disk equatorial crossing check
                 if (p_prev.z * p.z < 0.0 && params.enable_disk) {
                     double t_cross = -p_prev.z / (p.z - p_prev.z);
                     Vector3 p_cross = p_prev + t_cross * (p - p_prev);
-                    double r_cross = p_cross.length();
+                    
+                    // In Kerr-Schild, the coordinate distance at z=0 is:
+                    // x^2 + y^2 = r_cross^2 + a^2 => r_cross = sqrt(x^2 + y^2 - a^2)
+                    double r_cross = std::sqrt(std::max(0.0, p_cross.x * p_cross.x + p_cross.y * p_cross.y - a * a));
 
                     if (r_cross >= params.disk_inner && r_cross <= params.disk_outer) {
-                        // Keplerian orbit speed in isotropic coordinates
-                        double R_cross = r_cross * std::pow(1.0 + M / (2.0 * r_cross), 2.0);
-                        double speed = std::sqrt(M / R_cross);
-                        Vector3 disk_vel = Vector3(-p_cross.y, p_cross.x, 0.0) / r_cross * speed;
+                        // Keplerian orbital angular velocity in Kerr spacetime
+                        double omega = std::sqrt(M) / (std::pow(r_cross, 1.5) + a * std::sqrt(M));
+                        double speed = omega * std::sqrt(r_cross * r_cross + a * a); // coordinate speed in plane
+                        
+                        // Disk velocity vector
+                        Vector3 disk_vel = Vector3(-p_cross.y, p_cross.x, 0.0) / std::sqrt(std::max(1e-6, p_cross.x * p_cross.x + p_cross.y * p_cross.y)) * speed;
 
-                        // Doppler beaming factor
-                        Vector3 ray_dir = v.normalized();
+                        // Doppler beaming factor (momentum v in Kerr-Schild)
+                        Vector3 ray_dx, ray_dp; double r_dummy;
+                        GetDerivatives(p_cross, v, M, a, ray_dx, ray_dp, r_dummy);
+                        Vector3 ray_dir = ray_dx.normalized();
+                        
                         double v_dot_rd = dot(disk_vel, ray_dir);
                         double beta2 = dot(disk_vel, disk_vel);
-                        double gamma = 1.0 / std::sqrt(1.0 - beta2);
+                        double gamma = 1.0 / std::sqrt(std::max(0.01, 1.0 - beta2));
                         double doppler = 1.0 / (gamma * (1.0 - v_dot_rd));
 
-                        // Gravitational redshift
-                        double u_cross = M / (2.0 * r_cross);
-                        double g00_cross = std::pow((1.0 - u_cross) / (1.0 + u_cross), 2.0);
-                        double g00_cam = std::pow((1.0 - u) / (1.0 + u), 2.0);
-                        double grav_redshift = std::sqrt(g00_cross / g00_cam);
+                        // Gravitational redshift in Kerr-Schild:
+                        // g00 = 1 - 2H_KS (covariant metric)
+                        double H_KS_cross = (M * r_cross * r_cross * r_cross) / (r_cross * r_cross * r_cross * r_cross + a * a * 0.0);
+                        double g00_cross = 1.0 - 2.0 * H_KS_cross;
+                        if (g00_cross < 0.01) g00_cross = 0.01; // Clamp near horizon
+                        double grav_redshift = std::sqrt(g00_cross);
 
                         // Rotate the 3D position vector around Z to animate gas flow without seams
-                        double rot_angle = - params.time * (speed / r_cross) * 3.5;
+                        double angle = std::atan2(p_cross.y, p_cross.x);
+                        double rot_angle = angle - params.time * omega * 3.5;
                         double cos_a = std::cos(rot_angle);
                         double sin_a = std::sin(rot_angle);
                         Vector3 p_rot(
@@ -254,8 +364,8 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
                             0.0
                         );
 
-                        // Spiral pattern coordinate (sine wraps any 2pi or 4pi jump continuously)
-                        double spiral = std::sin(r_cross * 1.8 - std::atan2(p_rot.y, p_rot.x) * 2.0);
+                        // Spiral pattern coordinate
+                        double spiral = std::sin(r_cross * 1.8 - rot_angle * 2.0);
 
                         // Emission temperature (power scale raised slightly for steeper gradient)
                         double temp = std::pow(params.disk_inner / r_cross, 0.85) * params.disk_temp;

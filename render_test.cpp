@@ -60,7 +60,7 @@ bool SaveBMP(const char* filename, const unsigned char* rgb_buffer, int width, i
 
 int main() {
     std::cout << "========================================================\n";
-    std::cout << " C++ Schwarzschild Black Hole Visual Renderer Runner\n";
+    std::cout << " C++ Kerr (Spinning) Black Hole Visual Renderer Runner\n";
     std::cout << "========================================================\n\n";
 
     int width = 1024;
@@ -69,11 +69,12 @@ int main() {
 
     RenderParams params;
     params.M = 1.0;
+    params.a = 0.9;          // High spin parameter (Kerr black hole)
     params.cam_distance = 15.0;
     params.cam_pitch = 0.15; // Slightly tilted down (Interstellar-style)
     params.cam_yaw = 0.4;    // Slightly rotated perspective
     params.enable_disk = true;
-    params.disk_inner = 3.0;
+    params.disk_inner = 2.0; // ISCO moves inward for spin, so we can start inner disk closer (e.g. 2.0M)
     params.disk_outer = 12.0;
     params.disk_bright = 1.5;
     params.disk_temp = 1.4;
