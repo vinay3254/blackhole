@@ -76,39 +76,64 @@ Vector3 BlackHoleRenderer::Blackbody(double temp) {
 
 Vector3 BlackHoleRenderer::GetStarfield(const Vector3& rd) {
     Vector3 rd_norm = rd.normalized();
-    
-    // Scale coordinates to discretize stars
-    Vector3 grid_rd(std::floor(rd_norm.x * 350.0), 
-                    std::floor(rd_norm.y * 350.0), 
-                    std::floor(rd_norm.z * 350.0));
-    
-    double n = Hash(grid_rd);
-    Vector3 color(0.0, 0.0, 0.0);
 
-    if (n > 0.995) {
-        double term = n * 100.0;
-        double fract_term = term - std::floor(term);
-        double b = std::pow(fract_term, 12.0) * 0.9;
-        
-        double f5 = Hash(grid_rd * 5.0); f5 = f5 - std::floor(f5);
-        double f11 = Hash(grid_rd * 11.0); f11 = f11 - std::floor(f11);
-        double f17 = Hash(grid_rd * 17.0); f17 = f17 - std::floor(f17);
+    // Rotate to galactic coordinates (tilted by ~25 degrees / 0.436 radians around X)
+    double cos_tilt = std::cos(0.436);
+    double sin_tilt = std::sin(0.436);
+    Vector3 rd_g(
+        rd_norm.x,
+        rd_norm.y * cos_tilt - rd_norm.z * sin_tilt,
+        rd_norm.y * sin_tilt + rd_norm.z * cos_tilt
+    );
 
-        color = Vector3(
-            b * (0.85 + 0.15 * f5),
-            b * (0.85 + 0.15 * f11),
-            b * (0.90 + 0.10 * f17)
-        );
+    // 1. Galactic Bulge/Core (Warm, elliptical central bulge)
+    // Centered in direction of positive X axis
+    double core_arg = (1.0 - rd_g.x) * 6.0 + rd_g.y * rd_g.y * 30.0;
+    double core_intensity = std::exp(-core_arg);
+    Vector3 core_color = Vector3(1.6, 1.1, 0.7) * core_intensity;
+
+    // 2. Galactic Plane Band
+    double band_arg = rd_g.y * rd_g.y * 18.0;
+    double band_val = std::exp(-band_arg);
+
+    // FBM noise for dark interstellar dust lanes blocking galactic plane light
+    double dust = Fbm(rd_g * 5.5 + Vector3(17.4, 38.1, 82.3));
+    double band_intensity = band_val * std::max(0.0, 1.0 - 0.85 * dust);
+    Vector3 band_color = Vector3(0.55, 0.45, 0.85) * band_intensity;
+
+    // 3. Dual-Layer Starfield
+    Vector3 star_color(0.0, 0.0, 0.0);
+
+    // Layer A: Bright, sparse stars (will stretch into nice lensed arcs near the shadow)
+    Vector3 grid_bright(std::floor(rd_norm.x * 280.0), 
+                        std::floor(rd_norm.y * 280.0), 
+                        std::floor(rd_norm.z * 280.0));
+    double n1 = Hash(grid_bright);
+    if (n1 > 0.996) {
+        double b = std::pow((n1 - 0.996) / 0.004, 8.0) * 1.5;
+        double f5 = Hash(grid_bright * 5.0); f5 = f5 - std::floor(f5);
+        double f11 = Hash(grid_bright * 11.0); f11 = f11 - std::floor(f11);
+        star_color += Vector3(b * (0.8 + 0.2 * f5), b * (0.85 + 0.15 * f11), b * 1.1);
     }
 
-    // Add faint multi-colored nebulae background via FBM
-    double neb1 = Fbm(rd_norm * 2.0);
-    double neb2 = Fbm(rd_norm * 4.5 + Vector3(15.0, 20.0, 10.0));
+    // Layer B: Dense, dim background stars
+    Vector3 grid_dim(std::floor(rd_norm.x * 550.0), 
+                     std::floor(rd_norm.y * 550.0), 
+                     std::floor(rd_norm.z * 550.0));
+    double n2 = Hash(grid_dim);
+    if (n2 > 0.985) {
+        double b = std::pow((n2 - 0.985) / 0.015, 6.0) * 0.4;
+        double f7 = Hash(grid_dim * 7.0); f7 = f7 - std::floor(f7);
+        star_color += Vector3(b * (0.9 + 0.1 * f7), b * 0.9, b * 0.9);
+    }
 
-    color += Vector3(neb1 * 0.08, neb1 * 0.03, neb1 * 0.15) * 0.3;
-    color += Vector3(neb2 * 0.04, neb2 * 0.08, neb2 * 0.04) * 0.3;
+    // 4. Background Nebulae (Faint multi-colored gas clouds)
+    double neb1 = Fbm(rd_norm * 2.2);
+    double neb2 = Fbm(rd_norm * 4.0 + Vector3(25.0, 10.0, -15.0));
+    Vector3 neb_color = Vector3(neb1 * 0.08, neb1 * 0.02, neb1 * 0.14) * 0.25 +
+                        Vector3(neb2 * 0.03, neb2 * 0.07, neb2 * 0.03) * 0.25;
 
-    return color;
+    return core_color + band_color + star_color + neb_color;
 }
 
 void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int height, const RenderParams& params) {
@@ -219,11 +244,6 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
                         double g00_cam = std::pow((1.0 - u) / (1.0 + u), 2.0);
                         double grav_redshift = std::sqrt(g00_cross / g00_cam);
 
-                        double rel_shift = grav_redshift * (params.enable_beaming ? doppler : 1.0);
-
-                        // Emission temperature
-                        double temp = std::pow(params.disk_inner / r_cross, 0.75) * params.disk_temp;
-
                         // Rotate the 3D position vector around Z to animate gas flow without seams
                         double rot_angle = - params.time * (speed / r_cross) * 3.5;
                         double cos_a = std::cos(rot_angle);
@@ -237,17 +257,27 @@ void BlackHoleRenderer::RenderFrame(unsigned char* rgb_buffer, int width, int he
                         // Spiral pattern coordinate (sine wraps any 2pi or 4pi jump continuously)
                         double spiral = std::sin(r_cross * 1.8 - std::atan2(p_rot.y, p_rot.x) * 2.0);
 
-                        // Use continuous Cartesian coordinates in FBM noise
+                        // Emission temperature (power scale raised slightly for steeper gradient)
+                        double temp = std::pow(params.disk_inner / r_cross, 0.85) * params.disk_temp;
+
+                        // Use continuous Cartesian coordinates in FBM noise for primary gas lanes
                         double gas_noise = Fbm(Vector3(p_rot.x * 1.5, p_rot.y * 1.5, spiral * 1.5));
+
+                        // High-frequency magnetic shear turbulence layer
+                        double turbulence = Fbm(Vector3(p_rot.x * 6.5, p_rot.y * 6.5, spiral * 3.0));
+
+                        // Combined gas density combining main lanes with fine turbulent structures
+                        double combined_gas = (0.15 + 0.85 * gas_noise) * (0.65 + 0.35 * turbulence);
 
                         // Gas density envelope
                         double radial_envelope = std::exp(-std::pow(r_cross - (params.disk_inner + params.disk_outer) * 0.5, 2.0) /
                                                          (0.18 * std::pow(params.disk_outer - params.disk_inner, 2.0)));
-                        double density = (0.2 + 0.8 * gas_noise) * radial_envelope;
-                        double opacity = 1.0 - std::exp(-density * 1.4);
+                        double density = combined_gas * radial_envelope;
+                        double opacity = 1.0 - std::exp(-density * 1.5);
 
-                        // Color temperature color mapping & beaming intensity scale
-                        Vector3 shifted_color = Blackbody(temp * rel_shift);
+                        // Enhance Doppler beaming temperature shift to make blue-shifting more distinct
+                        double temp_shift = grav_redshift * (params.enable_beaming ? std::pow(doppler, 1.25) : 1.0);
+                        Vector3 shifted_color = Blackbody(temp * temp_shift);
                         double beaming = params.enable_beaming ? std::pow(doppler, 3.5) : 1.0;
                         Vector3 emission = shifted_color * beaming * params.disk_bright;
 
